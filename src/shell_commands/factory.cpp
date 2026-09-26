@@ -32,6 +32,7 @@
  * the concurrency profile the rest of this firmware has always run.
  */
 
+#include "pico.h"
 #include "shell/Console.h"
 #include "shell/console_colors.h"
 #include "commands.h"
@@ -564,7 +565,12 @@ bool factory_start(void) {
         printf("factory mode: no image yet -- copy a .bin onto the PICORVD drive\n");
     }
 #ifdef FACTORY_STANDALONE
-    printf("plug a board to flash it; solid LED = done. 'factory stop' to end.\n");
+#ifdef PICO_DEFAULT_LED_PIN
+    printf("plug a board to flash it; LED mostly on = passed, double blip = failed.\n"
+           "'factory stop' to end.\n");
+#else
+    printf("plug a board to flash it; green = passed, red = failed. 'factory stop' to end.\n");
+#endif
 #else
     printf("plug a board to flash it; LEDs white = done. 'factory stop' to end.\n");
 #endif
