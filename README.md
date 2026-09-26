@@ -1,5 +1,8 @@
 # Pico RISC-V Debugger
-Turn your RP2040 into ch32v003 flasher/debugger. Based on project aappleby/picorvd (see [links](#links) below).
+Turn your RP2040 into ch32v003 flasher/debugger. Forked from
+[Apache02/pico-rvd](https://github.com/Apache02/pico-rvd), which is in turn a
+fork of [aappleby/picorvd](https://github.com/aappleby/picorvd) (see
+[links](#links) below).
 
 ## Requirements
 
@@ -61,8 +64,7 @@ and type "help" to get list of commands.
 `factory` (in the console) starts an autonomous flashing loop for production:
 plug a board in, it gets flashed with the factory image stored in the probe,
 verified, and booted. Every outcome is recorded -- as a `CSV,...` console
-line, and also in a persistent log in the probe's own flash (top 128KB, 512
-records).
+line, and also in a persistent log in the probe's own flash (2048 records).
 
 ### Loading the factory image
 
@@ -71,7 +73,8 @@ The probe enumerates a small USB drive, `PICORVD`, next to its serial ports:
 * `README.TXT` -- what is stored right now
 * `CONFIG.TXT` -- the image's settings, editable in place
 * `CURRENT.BIN` -- the stored image (read-only)
-* `LOG.CSV` -- the factory log as of this boot (read-only)
+* `LOG.CSV` -- the factory log as of this boot (read-only; capped at 64KB,
+  roughly the first 700 records -- `factory log` on the console has them all)
 
 Copy a target firmware `.bin` onto the drive (and/or edit and save
 `CONFIG.TXT`). Once writes settle, the probe stores the image in its flash,
@@ -137,5 +140,6 @@ probe's log. The console equivalents are `factory log` and `factory stop` +
 `factory clear`.
 
 ## Links
+* https://github.com/Apache02/pico-rvd
 * https://github.com/aappleby/picorvd
 * https://github.com/cnlohr/ch32v003fun

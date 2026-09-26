@@ -2,13 +2,14 @@
  * @file factory_image.cpp
  * @brief The factory loop's target image and settings, in the probe's flash.
  *
- * Region layout, just below the factory log (factory_log.cpp): one sector
+ * Region layout (flash_layout.h), between the log's two segments: one sector
  * holding the header, then the image. The image is programmed first and the
  * header last, so a power cut mid-update leaves either no valid header or a
  * header whose CRCs match what it describes.
  */
 
 #include "factory_image.h"
+#include "flash_layout.h"
 #include "shell/console_colors.h"
 
 #include <FreeRTOS.h>
@@ -22,11 +23,6 @@
 #include <string.h>
 
 #define FIMG_MAGIC          0x474D4946u   /* "FIMG" */
-#define FIMG_DATA_SECTORS   ((FACTORY_IMAGE_MAX + FLASH_SECTOR_SIZE - 1) / FLASH_SECTOR_SIZE)
-#define FIMG_REGION_SIZE    ((1 + FIMG_DATA_SECTORS) * FLASH_SECTOR_SIZE)
-#define FIMG_LOG_SIZE       (128 * 1024)   /* factory_log.cpp's region, just above */
-#define FIMG_REGION_OFFSET  (PICO_FLASH_SIZE_BYTES - FIMG_LOG_SIZE - FIMG_REGION_SIZE)
-#define FIMG_DATA_OFFSET    (FIMG_REGION_OFFSET + FLASH_SECTOR_SIZE)
 
 struct fimg_header {
     uint32_t magic;

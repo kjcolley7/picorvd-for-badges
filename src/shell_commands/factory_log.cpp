@@ -1,10 +1,11 @@
 /**
  * @file factory_log.cpp
- * @brief Append-only production log in the top 128KB of the probe's flash.
+ * @brief Append-only production log in the probe's flash (2048 records).
  *
  * The standalone factory build runs with no PC attached, so the CSV lines the
  * tethered station relies on a host to capture have to live on the probe
- * itself. Layout: one record per 256-byte flash page, appended in order, CRC
+ * itself. Layout: one record per 256-byte flash page, appended in order
+ * through the log's two segments (flash_layout.h), CRC
  * over each record. The append point is simply the first still-erased page,
  * so there is no header or index to corrupt: a record is either fully written
  * (CRC checks out), torn by a power loss (CRC fails, reported and skipped at
@@ -21,6 +22,7 @@
  */
 
 #include "factory_log.h"
+#include "flash_layout.h"
 
 #include <hardware/flash.h>
 #include <hardware/regs/addressmap.h>
@@ -37,9 +39,6 @@
 #include "shell/console_colors.h"
 
 #define FLOG_MAGIC          0x474F4C46u                             // "FLOG"
-#define FLOG_REGION_SIZE    (128 * 1024)
-#define FLOG_REGION_OFFSET  (PICO_FLASH_SIZE_BYTES - FLOG_REGION_SIZE)
-#define FLOG_MAX_RECORDS    (FLOG_REGION_SIZE / FLASH_PAGE_SIZE)
 
 struct flog_record {
     uint32_t magic;
@@ -57,9 +56,24 @@ static_assert(sizeof(flog_record) <= FLASH_PAGE_SIZE, "record must fit a page");
 
 // Read the log through the uncached XIP alias: the cache may still hold the
 // erased 0xFF contents of a page we have since programmed.
+static uint32_t flog_offset(int i) {
+    return i < FLOG_SEG1_RECORDS
+         ? FLOG_SEG1_OFFSET + (uint32_t)i * FLASH_PAGE_SIZE
+         : FLOG_SEG2_OFFSET + (uint32_t)(i - FLOG_SEG1_RECORDS) * FLASH_PAGE_SIZE;
+}
+
 static const uint8_t *flog_page(int i) {
-    return (const uint8_t *)(XIP_NOCACHE_NOALLOC_BASE + FLOG_REGION_OFFSET
-                             + (uint32_t)i * FLASH_PAGE_SIZE);
+    return (const uint8_t *)(XIP_NOCACHE_NOALLOC_BASE + flog_offset(i));
+}
+
+static bool sector_erased(uint32_t offset) {
+    const uint32_t *p = (const uint32_t *)(XIP_NOCACHE_NOALLOC_BASE + offset);
+    for (uint32_t i = 0; i < FLASH_SECTOR_SIZE / 4; i++) {
+        if (p[i] != 0xFFFFFFFFu) {
+            return false;
+        }
+    }
+    return true;
 }
 
 static SemaphoreHandle_t flog_lock;
@@ -170,10 +184,19 @@ bool factory_log_append(const uint32_t uid[3], const char *fw_note,
     r->crc = crc32_of(r, offsetof(flog_record, crc));
 
     prog_args args = {
-        .offset = FLOG_REGION_OFFSET + (uint32_t)flog_next * FLASH_PAGE_SIZE,
+        .offset = flog_offset(flog_next),
         .data = page,
     };
-    int rc = flash_safe_execute(do_program, &args, 500);
+    // Starting a fresh sector: make sure it really is blank. Segment 2 was
+    // never part of the log on older firmware, so don't trust it blindly.
+    int rc = PICO_OK;
+    if (args.offset % FLASH_SECTOR_SIZE == 0 && !sector_erased(args.offset)) {
+        rc = flash_safe_execute(do_erase, (void *)(uintptr_t)args.offset, 500);
+        vTaskDelay(1);
+    }
+    if (rc == PICO_OK) {
+        rc = flash_safe_execute(do_program, &args, 500);
+    }
     bool written = rc == PICO_OK
                 && record_valid((const flog_record *)flog_page(flog_next));
     if (written) {
@@ -243,11 +266,13 @@ void factory_log_dump(void) {
 bool factory_log_clear(void) {
     xSemaphoreTake(flog_lock, portMAX_DELAY);
     bool okay = true;
-    for (uint32_t off = 0; off < FLOG_REGION_SIZE && okay; off += FLASH_SECTOR_SIZE) {
-        okay = flash_safe_execute(do_erase,
-                                  (void *)(uintptr_t)(FLOG_REGION_OFFSET + off),
-                                  500) == PICO_OK;
-        // Let USB and everything else breathe between the ~45ms erases.
+    for (int i = 0; i < FLOG_MAX_RECORDS && okay; i += FLASH_SECTOR_SIZE / FLASH_PAGE_SIZE) {
+        uint32_t off = flog_offset(i);
+        if (sector_erased(off)) {
+            continue;       // most of a partly used log: skip the ~45ms erase
+        }
+        okay = flash_safe_execute(do_erase, (void *)(uintptr_t)off, 500) == PICO_OK;
+        // Let USB and everything else breathe between the erases.
         vTaskDelay(1);
     }
     flog_next = okay ? 0 : -1;

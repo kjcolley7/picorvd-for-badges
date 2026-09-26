@@ -15,8 +15,9 @@ stuff that is easy to get wrong.
   `~/.local/bin/picotool load -x build/pico_rvd.uf2`. Use that picotool; the
   brew and pico-sdk copies segfault. `picotool --force` does not work on this
   firmware (custom USB descriptors, no reset interface).
-- A reflash keeps the factory image and the factory flash log (top 128KB)
-  intact.
+- A reflash keeps the factory image and the factory flash log intact
+  (layout in `flash_layout.h`: log in two segments, 2048 records, with the
+  image between them).
 
 ## RAM is tight
 
