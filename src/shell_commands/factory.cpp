@@ -214,10 +214,10 @@ static void factory_task(void *arg) {
 #endif
 
     while (factory_run) {
-        // The image can be replaced over USB between boards (msc_disk.cpp
-        // waits for the loop to be idle), so pick it up fresh each time.
-        FactoryImage img;
-        if (!factory_image_get(&img)) {
+        // Idle polling checks only the image header: CRCing the whole image
+        // every pass kept the flash busy with uncached reads four times a
+        // second, which is what glitched the WS2812 colors.
+        if (!factory_image_stored()) {
             factory_led = FACTORY_LED_NO_IMAGE;
             vTaskDelay(pdMS_TO_TICKS(500));
             continue;
@@ -235,6 +235,15 @@ static void factory_task(void *arg) {
         // the next. Only flash once the target has been there twice in a row.
         vTaskDelay(pdMS_TO_TICKS(100));
         if (!target_present()) {
+            continue;
+        }
+
+        // The image can be replaced over USB between boards (msc_disk.cpp
+        // waits for the loop to be idle), so pick it up fresh, fully
+        // checked, for each board.
+        FactoryImage img;
+        if (!factory_image_get(&img)) {
+            factory_led = FACTORY_LED_NO_IMAGE;
             continue;
         }
 

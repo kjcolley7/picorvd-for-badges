@@ -29,7 +29,13 @@ struct FactoryImage {
 };
 
 // The stored image, or false if none is stored (or it fails its CRC).
+// Checks the CRC of the whole image: call it once per board, not in a
+// polling loop (see factory_image_stored()).
 bool factory_image_get(FactoryImage *out);
+
+// Cheap check for idle loops: is there a valid header? Reads one page
+// rather than CRCing the image.
+bool factory_image_stored(void);
 
 // Erase and program the image region, then verify it reads back. Must be
 // called from a FreeRTOS task (uses flash_safe_execute). data may not point

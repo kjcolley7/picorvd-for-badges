@@ -33,8 +33,10 @@ volatile uint32_t g_led_beat = 0;
 // plain LED, only a WS2812. Bit-banged: 24 bits at ~1.25us each is ~30us with
 // IRQs masked per 10ms refresh, which is cheaper than claiming a PIO state
 // machine next to the SWIO and logic-analyzer programs. The color latches
-// on the >50us of idle line before the next refresh.
-static void ws2812_put(uint32_t grb) {
+// on the >50us of idle line before the next refresh. Runs from RAM: an XIP
+// cache miss mid-frame (likelier while the other core reads flash) would
+// stretch a bit and corrupt the color.
+static void __no_inline_not_in_flash_func(ws2812_put)(uint32_t grb) {
     uint32_t save = save_and_disable_interrupts();
     for (int i = 23; i >= 0; i--) {
         bool one = (grb >> i) & 1;

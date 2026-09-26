@@ -65,12 +65,17 @@ void factory_config_defaults(FactoryConfig *cfg) {
     cfg->selftest_cmd = -1;
 }
 
-bool factory_image_get(FactoryImage *out) {
+bool factory_image_stored(void) {
     const fimg_header *h = stored_header();
-    if (h->magic != FIMG_MAGIC || h->size == 0 || h->size > FACTORY_IMAGE_MAX
-        || h->hdr_crc != factory_crc32(h, offsetof(fimg_header, hdr_crc))) {
+    return h->magic == FIMG_MAGIC && h->size != 0 && h->size <= FACTORY_IMAGE_MAX
+        && h->hdr_crc == factory_crc32(h, offsetof(fimg_header, hdr_crc));
+}
+
+bool factory_image_get(FactoryImage *out) {
+    if (!factory_image_stored()) {
         return false;
     }
+    const fimg_header *h = stored_header();
     const uint8_t *data = (const uint8_t *)(FIMG_READ_BASE + FIMG_DATA_OFFSET);
     if (factory_crc32(data, h->size) != h->data_crc) {
         return false;
