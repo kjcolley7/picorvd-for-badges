@@ -480,15 +480,21 @@ static void factory_task(void *arg) {
         // A target whose new firmware repurposes the SWIO pin reads as absent
         // immediately; that is fine, because a target that no longer answers
         // can't be re-detected and re-flashed either, so falling through to
-        // "waiting" just arms the probe for the next board. The LED is NOT
-        // reset here: it holds the last board's verdict until a new board is
-        // detected, since in normal use (probe powered by the board it is
-        // flashing) an early flip to "waiting" would blank the one signal
-        // the operator has.
+        // "waiting" just arms the probe for the next board. The LED only
+        // goes back to "waiting" if the board was seen and then went away
+        // (below); otherwise the absence may just be the firmware taking the
+        // pin, and the verdict holds until a new board is detected.
         int gone = 0;
+        bool seen = false;
         while (gone < REMOVAL_POLLS && factory_run) {
             vTaskDelay(pdMS_TO_TICKS(200));
-            gone = target_present() ? 0 : gone + 1;
+            if (target_present()) {
+                gone = 0;
+                seen = true;
+            }
+            else {
+                gone++;
+            }
         }
 #else
         // Wait for removal over SWIO alone, as the standalone build does. A
@@ -497,20 +503,34 @@ static void factory_task(void *arg) {
         // cannot be re-detected or re-flashed anyway, so falling through
         // just arms the probe for the next board. A board that failed is
         // watched the same way, so reseating a bad SWIO contact retries it.
-        // The LED is deliberately left on the last verdict until a new board
-        // is detected, so the operator keeps the "done, unplug it" signal.
+        // The LED keeps the last verdict unless the board was seen and then
+        // went away (below), so the operator keeps the "done, unplug it"
+        // signal while the board may still be plugged in.
         //
         // (An earlier revision watched a passed board over I2C. That was
         // replaced while chasing the post-flash stall; the stall turned out
         // not to be I2C-related -- see factory_marks -- but SWIO is the
         // simpler watch and there is no reason to go back.)
         int gone = 0;
+        bool seen = false;
         while (gone < REMOVAL_POLLS && factory_run) {
             vTaskDelay(pdMS_TO_TICKS(200));
-            gone = target_present() ? 0 : gone + 1;
+            if (target_present()) {
+                gone = 0;
+                seen = true;
+            }
+            else {
+                gone++;
+            }
         }
 #endif
         factory_mark(3);
+        // A board that kept answering and then stopped was really unplugged:
+        // its verdict has been seen, so show "waiting" again. (A probe powered
+        // by the board goes dark on unplug anyway; this is for one on USB.)
+        if (factory_run && seen) {
+            factory_led = FACTORY_LED_WAITING;
+        }
         if (factory_run) {
             printf("    removed; waiting for next board\n");
         }

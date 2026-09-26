@@ -368,20 +368,22 @@ bool WCHFlash::verify_flash(uint32_t dst_addr, void *blob, int size) {
 
     dst_addr |= 0x08000000;
 
-    uint8_t *readback = new uint8_t[size];
-    rvd->get_block_aligned(dst_addr, readback, size);
-
+    // Read back in small chunks rather than one image-sized buffer: the C
+    // heap is too tight for a 16KB allocation to be safe.
     uint8_t *data = (uint8_t *) blob;
     bool mismatch = false;
-    for (int i = 0; i < size; i++) {
-        if (data[i] != readback[i]) {
-            LOG_R("Flash readback failed at address 0x%08x - want 0x%02x, got 0x%02x\n", dst_addr + i, data[i],
-                  readback[i]);
-            mismatch = true;
+    uint8_t readback[256];
+    for (int off = 0; off < size; off += (int) sizeof(readback)) {
+        int n = size - off < (int) sizeof(readback) ? size - off : (int) sizeof(readback);
+        rvd->get_block_aligned(dst_addr + off, readback, (n + 3) & ~3);
+        for (int i = 0; i < n; i++) {
+            if (data[off + i] != readback[i]) {
+                LOG_R("Flash readback failed at address 0x%08x - want 0x%02x, got 0x%02x\n", dst_addr + off + i,
+                      data[off + i], readback[i]);
+                mismatch = true;
+            }
         }
     }
-
-    delete[] readback;
 
     LOG("WCHFlash::verify_flash() done\n");
     return !mismatch;
