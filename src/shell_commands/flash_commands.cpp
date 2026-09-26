@@ -12,11 +12,26 @@ static inline bool check() {
         return false;
     }
 
+    if (!gApp->swio) {
+        printf(COLOR_RED("swio is null") "\n");
+        return false;
+    }
+
+    if (!gApp->swio->is_link_alive()) {
+        printf(COLOR_RED("target not responding (SWIO reads 0x%08lX) - try halt_on_reset, or replug") "\n",
+               gApp->swio->get_partid());
+        return false;
+    }
+
     return true;
 }
 
 void command_wipe(Console &c) {
     if (!check()) return;
 
-    gApp->flash->wipe_chip();
+    if (gApp->flash->wipe_chip()) {
+        printf(COLOR_GREEN("Wipe OK") "\n");
+    } else {
+        printf(COLOR_RED("Wipe failed") "\n");
+    }
 }

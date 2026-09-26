@@ -28,15 +28,17 @@ struct WCHFlash {
 
     void unlock_flash();
 
-    // Flash erase, addresses must be aligned
-    void wipe_page(uint32_t addr);
+    // Flash erase, addresses must be aligned.
+    // These return false if the target stopped responding.
+    bool wipe_page(uint32_t addr);
 
-    void wipe_sector(uint32_t addr);
+    bool wipe_sector(uint32_t addr);
 
-    void wipe_chip();
+    bool wipe_chip();
 
-    // Flash write, dest address must be aligned & size must be a multiple of 4
-    void write_flash(uint32_t dst_addr, void *blob, int size);
+    // Flash write, dest address must be aligned & size must be a multiple of 4.
+    // Returns false if the target stopped responding.
+    bool write_flash(uint32_t dst_addr, void *blob, int size);
 
     bool verify_flash(uint32_t dst_addr, void *blob, int size);
 
@@ -44,7 +46,7 @@ struct WCHFlash {
     void dump();
 
 private:
-    void run_flash_command(uint32_t addr, uint32_t ctl1, uint32_t ctl2);
+    bool run_flash_command(uint32_t addr, uint32_t ctl1, uint32_t ctl2);
 
     RVDebug *rvd;
     const int flash_size;

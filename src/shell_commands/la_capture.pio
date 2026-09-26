@@ -1,0 +1,15 @@
+;
+; 4-bit free-running logic analyzer.
+;
+; One sample per cycle, straight into the RX FIFO via autopush; a DMA channel in
+; write-ring mode drains it into a circular buffer. The state machine has no idea
+; a trigger exists -- arming and stopping are entirely the CPU's business -- which
+; keeps the sample stream perfectly uniform and the timebase trivially linear.
+;
+; IN base is the lowest of the four pins, so bit 0 of every sample is that pin.
+
+.program la4
+
+.wrap_target
+    in pins, 4
+.wrap

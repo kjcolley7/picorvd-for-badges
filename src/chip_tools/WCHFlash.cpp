@@ -212,22 +212,22 @@ void WCHFlash::unlock_flash() {
 
 //------------------------------------------------------------------------------
 
-void WCHFlash::wipe_page(uint32_t dst_addr) {
+bool WCHFlash::wipe_page(uint32_t dst_addr) {
     unlock_flash();
     dst_addr |= 0x08000000;
-    run_flash_command(dst_addr, BIT_CTLR_FTER, BIT_CTLR_FTER | BIT_CTLR_STRT);
+    return run_flash_command(dst_addr, BIT_CTLR_FTER, BIT_CTLR_FTER | BIT_CTLR_STRT);
 }
 
-void WCHFlash::wipe_sector(uint32_t dst_addr) {
+bool WCHFlash::wipe_sector(uint32_t dst_addr) {
     unlock_flash();
     dst_addr |= 0x08000000;
-    run_flash_command(dst_addr, BIT_CTLR_PER, BIT_CTLR_PER | BIT_CTLR_STRT);
+    return run_flash_command(dst_addr, BIT_CTLR_PER, BIT_CTLR_PER | BIT_CTLR_STRT);
 }
 
-void WCHFlash::wipe_chip() {
+bool WCHFlash::wipe_chip() {
     unlock_flash();
     uint32_t dst_addr = 0x08000000;
-    run_flash_command(dst_addr, BIT_CTLR_MER, BIT_CTLR_MER | BIT_CTLR_STRT);
+    return run_flash_command(dst_addr, BIT_CTLR_MER, BIT_CTLR_MER | BIT_CTLR_STRT);
 }
 
 //------------------------------------------------------------------------------
@@ -241,7 +241,7 @@ void WCHFlash::wipe_chip() {
 // good - 0x19e0006f
 // bad  - 0x00010040
 
-void WCHFlash::write_flash(uint32_t dst_addr, void *blob, int size) {
+bool WCHFlash::write_flash(uint32_t dst_addr, void *blob, int size) {
     LOG("WCHFlash::write_flash(0x%08x, 0x%08x, %d)\n", dst_addr, blob, size);
     unlock_flash();
 
@@ -294,13 +294,14 @@ void WCHFlash::write_flash(uint32_t dst_addr, void *blob, int size) {
     rvd->set_gpr(15, BIT_CTLR_FTPG | BIT_CTLR_BUFRST);
 
     bool first_word = true;
+    bool write_ok = true;
     int page_count = (size_dwords + 15) / 16;
 
     // Start feeding dwords to prog_write_flash.
 
     uint32_t busy_time = 0;
 
-    for (int page = 0; page < page_count; page++) {
+    for (int page = 0; page < page_count && write_ok; page++) {
         for (int dword_idx = 0; dword_idx < 16; dword_idx++) {
             int offset = (page * page_size) + (dword_idx * sizeof(uint32_t));
             uint32_t * src = (uint32_t *) ((uint8_t *) blob + offset);
@@ -314,7 +315,10 @@ void WCHFlash::write_flash(uint32_t dst_addr, void *blob, int size) {
                 // things break all weird
 
                 // This run_prog _must_ include a busywait
-                rvd->run_prog_slow();
+                if (!rvd->run_prog_slow()) {
+                    write_ok = false;
+                    break;
+                }
                 rvd->set_abstractauto(0x00000001);
                 first_word = false;
             } else {
@@ -322,7 +326,10 @@ void WCHFlash::write_flash(uint32_t dst_addr, void *blob, int size) {
                 // of each page, but I am wary...
                 // Waiting here takes 54443 us to write 564 bytes
                 //uint32_t time_a = time_us_32();
-                while (rvd->get_abstractcs().BUSY) {}
+                if (!rvd->wait_not_busy()) {
+                    write_ok = false;
+                    break;
+                }
                 //uint32_t time_b = time_us_32();
                 //busy_time += time_b - time_a;
             }
@@ -345,7 +352,13 @@ void WCHFlash::write_flash(uint32_t dst_addr, void *blob, int size) {
 
     //printf("busy_time %d\n", busy_time);
 
+    if (!write_ok) {
+        printf_r("WCHFlash::write_flash() - target stopped responding, write aborted\n");
+        return false;
+    }
+
     LOG("WCHFlash::write_flash() done\n");
+    return true;
 }
 
 //------------------------------------------------------------------------------
@@ -438,7 +451,7 @@ void WCHFlash::dump() {
 
 //------------------------------------------------------------------------------
 
-void WCHFlash::run_flash_command(uint32_t addr, uint32_t ctl1, uint32_t ctl2) {
+bool WCHFlash::run_flash_command(uint32_t addr, uint32_t ctl1, uint32_t ctl2) {
     static const uint16_t prog_flash_command[16] = {
             0xc94c, // sw      a1,20(a0)
             0xc910, // sw      a2,16(a0)
@@ -467,7 +480,7 @@ void WCHFlash::run_flash_command(uint32_t addr, uint32_t ctl1, uint32_t ctl2) {
     rvd->set_gpr(11, addr);
     rvd->set_gpr(12, ctl1);
     rvd->set_gpr(13, ctl2);
-    rvd->run_prog_slow();
+    return rvd->run_prog_slow();
 }
 
 //------------------------------------------------------------------------------

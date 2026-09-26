@@ -23,6 +23,16 @@ struct PicoSWIO : public Bus {
 
     uint32_t get_partid();
 
+    // True if the target answers with something other than all-ones/all-zeroes.
+    bool is_link_alive();
+
+    // Borrow the SWIO pin as a UART TX, send one 8N1 byte, and hand the pin
+    // back to the SWIO engine. For targets that also use their SWIO pin as a
+    // UART RX (e.g. to trigger a post-flash self-test). Does not touch the
+    // target's debug module, so a running target keeps running. False if
+    // this pin has no UART TX function.
+    bool send_uart_byte(uint8_t byte, uint32_t baud);
+
     void dump();
 
 private:
@@ -35,9 +45,13 @@ private:
 
     const char *addr_to_regname(uint8_t addr);
 
+    // Rebuild a stalled state machine (see recover() in the .cpp).
+    void recover();
+
     int pin = -1;
     int cmd_count = 0;
     int pio_sm = 0;
+    uint32_t pio_offset = 0;
 };
 
 //------------------------------------------------------------------------------

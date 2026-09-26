@@ -62,13 +62,18 @@
 /* Memory allocation related definitions. */
 #define configSUPPORT_STATIC_ALLOCATION         0
 #define configSUPPORT_DYNAMIC_ALLOCATION        1           // Get FreeRTOS to allocation task memory
-#define configTOTAL_HEAP_SIZE                   (128*1024)
+// FreeRTOS allocates only task stacks and TCBs from here -- about 15KB all told
+// -- so 128KB was 8x what it needed, and it came out of the same 256KB as the
+// newlib heap that Console and GDBServer draw their 16KB packet buffers from.
+// That left the C heap close enough to full that a change in .bss padding could
+// (and did) stop the probe booting.
+#define configTOTAL_HEAP_SIZE                   (32*1024)
 #define configAPPLICATION_ALLOCATED_HEAP        0
 
 /* Hook function related definitions. */
 #define configUSE_IDLE_HOOK                     0
 #define configUSE_TICK_HOOK                     0
-#define configCHECK_FOR_STACK_OVERFLOW          0
+#define configCHECK_FOR_STACK_OVERFLOW          2   // canary check every context switch
 #define configUSE_MALLOC_FAILED_HOOK            0
 #define configUSE_DAEMON_TASK_STARTUP_HOOK      0
 

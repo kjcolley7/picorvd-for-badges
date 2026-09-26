@@ -6,12 +6,13 @@
 #define USBD_VID 0x2E8A /* Raspberry Pi */
 #define USBD_PID 0x000A /* Raspberry Pi Pico SDK CDC */
 
-#define USBD_DESC_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN * CFG_TUD_CDC)
+#define USBD_DESC_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN * CFG_TUD_CDC + TUD_MSC_DESC_LEN)
 #define USBD_MAX_POWER_MA 500
 
 #define USBD_ITF_CDC_0 0
 #define USBD_ITF_CDC_1 2
-#define USBD_ITF_MAX 4
+#define USBD_ITF_MSC 4
+#define USBD_ITF_MAX 5
 
 #define USBD_CDC_0_EP_CMD 0x81
 #define USBD_CDC_1_EP_CMD 0x83
@@ -22,6 +23,10 @@
 #define USBD_CDC_0_EP_IN 0x82
 #define USBD_CDC_1_EP_IN 0x84
 
+#define USBD_MSC_EP_OUT 0x05
+#define USBD_MSC_EP_IN 0x85
+#define USBD_MSC_IN_OUT_MAX_SIZE 64
+
 #define USBD_CDC_CMD_MAX_SIZE 8
 #define USBD_CDC_IN_OUT_MAX_SIZE 64
 
@@ -31,6 +36,7 @@
 #define USBD_STR_PRODUCT (0x02)
 #define USBD_STR_SERIAL (0x03)
 #define USBD_STR_CDC (0x04)
+#define USBD_STR_MSC (0x05)
 
 static const tusb_desc_device_t usbd_desc_device = {
         .bLength = sizeof(tusb_desc_device_t),
@@ -42,7 +48,7 @@ static const tusb_desc_device_t usbd_desc_device = {
         .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
         .idVendor = USBD_VID,
         .idProduct = USBD_PID,
-        .bcdDevice = 0x0100,
+        .bcdDevice = 0x0101,   // bumped when the interface layout changes
         .iManufacturer = USBD_STR_MANUF,
         .iProduct = USBD_STR_PRODUCT,
         .iSerialNumber = USBD_STR_SERIAL,
@@ -60,6 +66,9 @@ static const uint8_t usbd_desc_cfg[USBD_DESC_LEN] = {
         TUD_CDC_DESCRIPTOR(USBD_ITF_CDC_1, USBD_STR_CDC, USBD_CDC_1_EP_CMD,
                            USBD_CDC_CMD_MAX_SIZE, USBD_CDC_1_EP_OUT, USBD_CDC_1_EP_IN,
                            USBD_CDC_IN_OUT_MAX_SIZE),
+
+        TUD_MSC_DESCRIPTOR(USBD_ITF_MSC, USBD_STR_MSC, USBD_MSC_EP_OUT, USBD_MSC_EP_IN,
+                           USBD_MSC_IN_OUT_MAX_SIZE),
 };
 
 static char usbd_serial[USBD_STR_SERIAL_LEN] = "000000000000";
@@ -69,6 +78,7 @@ static const char *const usbd_desc_str[] = {
         [USBD_STR_PRODUCT] = "ch32v003 debugger",
         [USBD_STR_SERIAL] = usbd_serial,
         [USBD_STR_CDC] = "Board CDC",
+        [USBD_STR_MSC] = "Factory image",
 };
 
 const uint8_t *tud_descriptor_device_cb(void) {
@@ -101,6 +111,10 @@ const uint16_t *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
     desc_str[0] = (TUSB_DESC_STRING << 8) | (2 * len + 2);
 
     return desc_str;
+}
+
+const char *usbd_serial_str(void) {
+    return usbd_serial;
 }
 
 void usbd_serial_init(void) {

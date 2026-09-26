@@ -1,8 +1,19 @@
 #include "RVDebug.h"
 #include <stdio.h>
 
+#include "pico/time.h"
+
 #include "debug_defines.h"
 #include "utils.h"
+
+//------------------------------------------------------------------------------
+// A debug module register that reads back as all-ones or all-zeroes means the
+// SWIO line is stuck high/low - the target is unpowered, disconnected, or not
+// in debug mode - and the value is not real status.
+
+static bool is_dead_read(uint32_t raw) {
+    return raw == 0x00000000 || raw == 0xFFFFFFFF;
+}
 
 //------------------------------------------------------------------------------
 
@@ -29,14 +40,81 @@ void RVDebug::init() {
 
 //------------------------------------------------------------------------------
 
+bool RVDebug::link_ok() {
+    return !is_dead_read(get_dmstatus());
+}
+
+//------------------------------------------------------------------------------
+// All of the debug module handshakes used to be unbounded spin loops, which
+// wedged the firmware permanently whenever the SWIO link was dead. Every wait
+// now gives up - either because the link is obviously dead, or because the
+// (very generous) timeout expired.
+
+bool RVDebug::wait_dmstatus(uint32_t mask, bool set, const char *what,
+                            uint32_t timeout_us) {
+    uint32_t start_us = time_us_32();
+
+    for (;;) {
+        uint32_t dmstatus = get_dmstatus();
+
+        // Reporting is left to the caller - halt_on_reset polls halt() in a tight
+        // loop while the link is down, and printing from here would flood it.
+        if (is_dead_read(dmstatus)) {
+            LOG_R("RVDebug: target not responding while waiting for %s (DMSTATUS = 0x%08lx)\n",
+                  what, (unsigned long) dmstatus);
+            return false;
+        }
+
+        bool matched = set ? ((dmstatus & mask) == mask) : ((dmstatus & mask) == 0);
+        if (matched) return true;
+
+        LOG("%s not %s yet\n", what, set ? "set" : "cleared");
+
+        if ((time_us_32() - start_us) > timeout_us) {
+            LOG_R("RVDebug: timed out waiting for %s (DMSTATUS = 0x%08lx)\n",
+                  what, (unsigned long) dmstatus);
+            return false;
+        }
+    }
+}
+
+//------------------------------------------------------------------------------
+
+bool RVDebug::wait_not_busy(uint32_t timeout_us) {
+    uint32_t start_us = time_us_32();
+
+    for (;;) {
+        uint32_t abstractcs = get_abstractcs();
+
+        if (is_dead_read(abstractcs)) {
+            LOG_R("RVDebug: target not responding while waiting for the debug module (ABSTRACTCS = 0x%08lx)\n",
+                  (unsigned long) abstractcs);
+            return false;
+        }
+
+        if (!Reg_ABSTRACTCS(abstractcs).BUSY) return true;
+
+        if ((time_us_32() - start_us) > timeout_us) {
+            LOG_R("RVDebug: timed out waiting for the debug module to finish (ABSTRACTCS = 0x%08lx)\n",
+                  (unsigned long) abstractcs);
+            return false;
+        }
+    }
+}
+
+//------------------------------------------------------------------------------
+
 bool RVDebug::halt() {
     LOG("RVDebug::halt()\n");
 
     set_dmcontrol(0x80000001);
-    while (!get_dmstatus().ALLHALTED) {
-        LOG("ALLHALTED not set yet\n");
-    }
+    bool halted = wait_dmstatus(BIT_ALLHALTED, true, "ALLHALTED");
     set_dmcontrol(0x00000001);
+
+    if (!halted) {
+        LOG("RVDebug::halt() failed\n");
+        return false;
+    }
 
     LOG("RVDebug::halt() done\n");
     return true;
@@ -97,27 +175,31 @@ bool RVDebug::reset() {
 
     // Halt and leave halt request set
     set_dmcontrol(0x80000001);
-    while (!get_dmstatus().ALLHALTED) {
-        LOG("ALLHALTED not set yet 1\n");
+    if (!wait_dmstatus(BIT_ALLHALTED, true, "ALLHALTED (pre-reset)")) {
+        set_dmcontrol(0x00000001);
+        return false;
     }
 
     // Set reset request
     set_dmcontrol(0x80000003);
-    while (!get_dmstatus().ALLHAVERESET) {
-        LOG("ALLHAVERESET not set yet\n");
+    if (!wait_dmstatus(BIT_ALLHAVERESET, true, "ALLHAVERESET")) {
+        set_dmcontrol(0x00000001);
+        return false;
     }
 
     // Clear reset request and hold halt request
     set_dmcontrol(0x80000001);
     // this busywait seems to be required or we hang
-    while (!get_dmstatus().ALLHALTED) {
-        LOG("ALLHALTED not set yet 2\n");
+    if (!wait_dmstatus(BIT_ALLHALTED, true, "ALLHALTED (post-reset)")) {
+        set_dmcontrol(0x00000001);
+        return false;
     }
 
     // Clear HAVERESET
     set_dmcontrol(0x90000001);
-    while (get_dmstatus().ALLHAVERESET) {
-        LOG("ALLHAVERESET not cleared yet\n");
+    if (!wait_dmstatus(BIT_ALLHAVERESET, false, "ALLHAVERESET to clear")) {
+        set_dmcontrol(0x00000001);
+        return false;
     }
 
     // Clear halt request
@@ -187,7 +269,7 @@ void RVDebug::load_prog(const char *name, uint32_t *prog, uint32_t clobber) {
 
 //------------------------------------------------------------------------------
 
-void RVDebug::run_prog(bool wait_until_not_busy) {
+bool RVDebug::run_prog(bool wait_until_not_busy) {
     //LOG("RVDebug::run_prog()\n");
 
     // We can NOT save registers here, as doing so would clobber DATA0 which may
@@ -197,10 +279,10 @@ void RVDebug::run_prog(bool wait_until_not_busy) {
     cmd.POSTEXEC = 1;
     set_command(cmd);
 
+    bool ok = true;
+
     if (wait_until_not_busy) {
-        while (get_abstractcs().BUSY) {
-            //LOG("get_abstractcs().BUSY not cleared yet\n");
-        }
+        ok = wait_not_busy();
     } else {
         // It takes 40 usec to do _anything_ over the debug interface, so if the
         // program is "fast" then we should _never_ see BUSY... right?
@@ -210,6 +292,7 @@ void RVDebug::run_prog(bool wait_until_not_busy) {
     this->dirty_regs |= prog_will_clobber;
 
     //LOG("RVDebug::run_prog() done\n");
+    return ok;
 }
 
 //------------------------------------------------------------------------------
@@ -575,6 +658,31 @@ uint32_t RVDebug::get_mem_u32_aligned(uint32_t addr) {
     auto result = get_data0();
 
     return result;
+}
+
+//------------------------------------------------------------------------------
+
+// The fast variant above issues the command and reads DATA0 straight back,
+// on the assumption that a six-instruction program always completes within
+// one SWIO round trip. Reading the electronic-signature area of a freshly
+// halted CH32V003 -- in particular a blank one -- demonstrably breaks that
+// assumption: DATA0 still holds the *previous* read, so a sequence of reads
+// comes back shifted by one word. The factory loop saw this as 44 of 47
+// production UIDs failing its consistency check and being logged as zero.
+// Waiting on ABSTRACTCS.BUSY costs one extra DMI transaction per word and
+// removes the guess.
+uint32_t RVDebug::get_mem_u32_sync(uint32_t addr) {
+    if (addr & 3) {
+        LOG_R("RVDebug::get_mem_u32_sync() - Bad address 0x%08x\n", addr);
+        return 0;
+    }
+
+    load_prog("prog_get_set_u32", (uint32_t *) prog_get_set_u32, BIT_A0 | BIT_A1);
+    set_data1(addr);
+    if (!run_prog_slow()) {
+        return 0;               // run_prog logged why
+    }
+    return get_data0();
 }
 
 //------------------------------------------------------------------------------

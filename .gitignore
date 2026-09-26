@@ -1,8 +1,12 @@
 build
+build-*
+__pycache__
+.DS_Store
 cmake-build-default
 cmake-build-debug
 cmake-build-release
 .idea
 .vscode
+FreeRTOS-Kernel
 
 examples/**/*.elf

@@ -24,6 +24,21 @@
 #define BIT_A4 (1 << 14)
 #define BIT_A5 (1 << 15)
 
+//------------------------------------------------------------------------------
+// Bounds for polling the debug module.
+//
+// A healthy CH32V003 halts/resets in well under a millisecond, so these limits
+// are never reached on working hardware. They exist so that a dead SWIO link -
+// where every read comes back as all-ones and status bits appear stuck - makes
+// the operation fail instead of spinning forever.
+
+// DMSTATUS bits (halt/reset handshakes) settle almost immediately.
+static const uint32_t DM_STATUS_TIMEOUT_US = 50'000;
+
+// Abstract commands can take much longer, as the target program they run may
+// busywait on flash - a full chip erase is the worst case.
+static const uint32_t DM_BUSY_TIMEOUT_US = 2'000'000;
+
 struct Reg_DMCONTROL;
 struct Reg_DMSTATUS;
 struct Reg_HARTINFO;
@@ -61,15 +76,31 @@ struct RVDebug {
     bool enable_breakpoints();
 
     //----------
+    // Link health & bounded waits
+
+    // False if the debug module reads back as all-ones or all-zeroes, which
+    // means the SWIO line is stuck rather than reporting real status.
+    bool link_ok();
+
+    // Polls DMSTATUS until the bits in 'mask' are all set (set == true) or all
+    // clear (set == false). Returns false on timeout or if the link goes dead.
+    bool wait_dmstatus(uint32_t mask, bool set, const char *what,
+                       uint32_t timeout_us = DM_STATUS_TIMEOUT_US);
+
+    // Polls ABSTRACTCS until the debug module is no longer busy. Returns false
+    // on timeout or if the link goes dead.
+    bool wait_not_busy(uint32_t timeout_us = DM_BUSY_TIMEOUT_US);
+
+    //----------
     // Run small (32 byte on CH32V003) programs from the debug program buffer
 
     void load_prog(const char *name, uint32_t *prog, uint32_t clobbers);
 
-    void run_prog(bool wait_until_not_busy);
+    bool run_prog(bool wait_until_not_busy);
 
-    void run_prog_slow() { run_prog(true); }
+    bool run_prog_slow() { return run_prog(true); }
 
-    void run_prog_fast() { run_prog(false); }
+    bool run_prog_fast() { return run_prog(false); }
 
     //----------
     // Debug module register access
@@ -151,6 +182,10 @@ struct RVDebug {
     // Memory access
 
     uint32_t get_mem_u32(uint32_t addr);
+    // Aligned word read that waits for the abstract command to finish before
+    // reading DATA0. See the definition for when the fast read returns stale
+    // data; use this where the value must be right the first time.
+    uint32_t get_mem_u32_sync(uint32_t addr);
 
     uint16_t get_mem_u16(uint32_t addr);
 
@@ -231,6 +266,8 @@ static_assert(sizeof(Reg_DMCONTROL) == 4);
 const int BIT_ALLHALTED = (1 << 9);
 const int BIT_ALLRUNNING = (1 << 11);
 const int BIT_ALLRESUMEACK = (1 << 17);
+const int BIT_ANYHAVERESET = (1 << 18);
+const int BIT_ALLHAVERESET = (1 << 19);
 
 struct Reg_DMSTATUS {
     Reg_DMSTATUS(uint32_t raw = 0) { this->raw = raw; }

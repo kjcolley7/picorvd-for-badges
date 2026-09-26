@@ -1,5 +1,6 @@
 #include "commands.h"
 #include "pico/time.h"
+#include "debug_defines.h"
 
 #ifndef DUMP_DEFAULT_ADDRESS
 #define DUMP_DEFAULT_ADDRESS     (0x08000000)
@@ -12,12 +13,33 @@ static inline bool check() {
         return false;
     }
 
+    if (!gApp->swio) {
+        printf(COLOR_RED("swio is null") "\n");
+        return false;
+    }
+
     return true;
+}
+
+// Prints the standard "the target is not there" message.
+static void print_link_error() {
+    printf(COLOR_RED("target not responding (SWIO reads 0x%08lX) - try halt_on_reset, or replug") "\n",
+           gApp->swio->get_partid());
+}
+
+// True if the target answers at all. Commands use this to fail with a clear
+// message instead of grinding through timeouts on a dead link.
+static bool check_link() {
+    if (gApp->swio->is_link_alive()) return true;
+
+    print_link_error();
+    return false;
 }
 
 
 void command_dump(Console &c) {
     if (!check()) return;
+    if (!check_link()) return;
 
     auto addr = c.packet.take_int().ok_or(DUMP_DEFAULT_ADDRESS);
     printf("addr 0x%08x\n", addr);
@@ -39,6 +61,7 @@ void command_dump(Console &c) {
 
 void command_dump2(Console &c) {
     if (!check()) return;
+    if (!check_link()) return;
 
     auto addr = c.packet.take_int().ok_or(DUMP_DEFAULT_ADDRESS);
     printf("addr 0x%08x\n", addr);
@@ -84,36 +107,43 @@ void command_dump2(Console &c) {
 
 void command_reset(Console &c) {
     if (!check()) return;
+    if (!check_link()) return;
 
     if (gApp->rvd->reset()) {
         printf(COLOR_GREEN("Reset OK") "\n");
     } else {
         printf(COLOR_RED("Reset failed") "\n");
+        if (!gApp->swio->is_link_alive()) print_link_error();
     }
 }
 
 void command_halt(Console &c) {
     if (!check()) return;
+    if (!check_link()) return;
 
     if (gApp->rvd->halt()) {
         printf(COLOR_GREEN("Halted at DPC = 0x%08lx") "\n",  gApp->rvd->get_dpc());
     } else {
         printf(COLOR_RED("Halt failed") "\n");
+        if (!gApp->swio->is_link_alive()) print_link_error();
     }
 }
 
 void command_resume(Console &c) {
     if (!check()) return;
+    if (!check_link()) return;
 
     if (gApp->rvd->resume()) {
         printf(COLOR_GREEN("Resume OK") "\n");
     } else {
         printf(COLOR_RED("Resume failed") "\n");
+        if (!gApp->swio->is_link_alive()) print_link_error();
     }
 }
 
 void command_step(Console &c) {
     if (!check()) return;
+    if (!check_link()) return;
 
     int count = c.packet.take_int().ok_or(1);
     if (count < 1) {
@@ -126,6 +156,7 @@ void command_step(Console &c) {
             printf(COLOR_GREEN("%d. Stepped to DPC = 0x%08lx") "\n", i,  gApp->rvd->get_dpc());
         } else {
             printf(COLOR_RED("Step failed") "\n");
+            if (!gApp->swio->is_link_alive()) print_link_error();
             break;
         }
     }
@@ -135,6 +166,13 @@ void command_step(Console &c) {
 void command_status(Console &c) {
     if (!check()) return;
 
+    // Still dump on a dead link - the register values are useful for diagnosis -
+    // but say up front that they can't be trusted.
+    if (!gApp->swio->is_link_alive()) {
+        print_link_error();
+        printf(COLOR_YELLOW("(the register values below are not real)") "\n");
+    }
+
     gApp->rvd->dump();
 }
 
@@ -142,6 +180,93 @@ void command_init_swio(Console &c) {
     if (!check()) return;
 
     gApp->swio->reset();
+
+    if (gApp->swio->is_link_alive()) {
+        printf(COLOR_GREEN("SWIO init OK") "\n");
+    } else {
+        print_link_error();
+    }
+}
+
+// Loopback test: DM_DATA0 is plain read/write scratch in the debug module, so
+// writing a pattern and reading it back exercises the write path end to end.
+// Reads can look perfect while writes are being dropped, and the two failure
+// modes need telling apart before anything else makes sense.
+void command_swio_test(Console &c) {
+    if (!check()) return;
+
+    static const uint32_t pats[] = {
+        0x00000001, 0x80000000, 0x80000001, 0xFFFFFFFF,
+        0x5A5A5A5A, 0xA5A5A5A5, 0x00000003, 0xDEADBEEF,
+    };
+    int bad = 0;
+    for (unsigned i = 0; i < count_of(pats); i++) {
+        gApp->swio->put(DM_DATA0, pats[i]);
+        uint32_t rd = gApp->swio->get(DM_DATA0);
+        if (rd != pats[i]) {
+            bad++;
+            printf(COLOR_RED("  wrote 0x%08lX read 0x%08lX") "\n",
+                   (unsigned long) pats[i], (unsigned long) rd);
+        } else {
+            printf("  wrote 0x%08lX ok\n", (unsigned long) pats[i]);
+        }
+    }
+
+    int bitbad = 0;
+    for (int b = 0; b < 32; b++) {
+        uint32_t v = 1u << b;
+        gApp->swio->put(DM_DATA0, 0);
+        gApp->swio->put(DM_DATA0, v);
+        if (gApp->swio->get(DM_DATA0) != v) {
+            bitbad++;
+            printf(COLOR_RED("  bit %d failed") "\n", b);
+        }
+    }
+    printf(bad || bitbad ? COLOR_RED("swio_test: %d pattern, %d bit failures") "\n"
+                         : COLOR_GREEN("swio_test: %d pattern, %d bit failures") "\n",
+           bad, bitbad);
+}
+
+// Watch DMSTATUS while trying to take the hart, and say which step fails.
+// "Halt failed" on its own cannot distinguish a hart that ignores HALTREQ from
+// one that keeps resetting out from under it.
+void command_why(Console &c) {
+    if (!check()) return;
+
+    uint32_t st = gApp->swio->get(DM_DMSTATUS);
+    printf("dmstatus       = 0x%08lX  halted=%d running=%d havereset=%d unavail=%d\n",
+           (unsigned long) st, (int) ((st >> 9) & 1), (int) ((st >> 11) & 1),
+           (int) ((st >> 19) & 1), (int) ((st >> 13) & 1));
+
+    // Is the hart resetting over and over? Ack HAVERESET and see if it comes
+    // back on its own - that is what a watchdog or a boot loop looks like.
+    gApp->swio->put(DM_DMCONTROL, 0x10000001);
+    st = gApp->swio->get(DM_DMSTATUS);
+    printf("after ack      = 0x%08lX  havereset=%d\n",
+           (unsigned long) st, (int) ((st >> 19) & 1));
+
+    int reasserts = 0;
+    for (int i = 0; i < 40; i++) {
+        busy_wait_us(2000);
+        if (gApp->swio->get(DM_DMSTATUS) & (1u << 19)) {
+            reasserts++;
+            gApp->swio->put(DM_DMCONTROL, 0x10000001);
+        }
+    }
+    printf("havereset re-asserted %d/40 times over ~80ms%s\n", reasserts,
+           reasserts ? "  <-- the hart is resetting repeatedly" : "");
+
+    // Now try to halt, reporting how DMSTATUS moves.
+    gApp->swio->put(DM_DMCONTROL, 0x80000001);
+    for (int i = 0; i < 20; i++) {
+        st = gApp->swio->get(DM_DMSTATUS);
+        if (st & (1u << 9)) break;
+        busy_wait_us(1000);
+    }
+    printf("after haltreq  = 0x%08lX  halted=%d running=%d havereset=%d\n",
+           (unsigned long) st, (int) ((st >> 9) & 1), (int) ((st >> 11) & 1),
+           (int) ((st >> 19) & 1));
+    gApp->swio->put(DM_DMCONTROL, 0x00000001);
 }
 
 void command_part_id(Console &c) {
@@ -154,18 +279,14 @@ void command_part_id(Console &c) {
 // When swio pin stay HIGH or LOW all reads returns only 1 or 0
 // part_id should be not 0xffffffff of 0x00000000, so we can use it to identify when swio is actually in debug mode
 static bool check_part_id() {
-    uint32_t part_id = gApp->swio->get_partid();
-    if (part_id == 0 || part_id == 0xffffffff) {
-        return false;
-    }
-
-    // In theory it's possible to found moment when pin switching and part_id looks like 0xFFFF0000
-    // so double check part id for sure
-    return part_id == gApp->swio->get_partid();
+    return gApp->swio->is_link_alive();
 }
 
 void command_halt_on_reset(Console &c) {
     if (!check()) return;
+
+    // No check_link() here - reviving a dead link is exactly what this command
+    // is for.
 
     printf("Trying enter debug mode in normal way... ");
     gApp->rvd->halt();
@@ -209,6 +330,7 @@ void command_halt_on_reset(Console &c) {
 
 void command_chip_id(Console &c) {
     if (!check()) return;
+    if (!check_link()) return;
 
     static const struct {
         uint32_t part_id;
