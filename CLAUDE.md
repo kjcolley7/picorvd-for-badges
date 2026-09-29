@@ -126,4 +126,9 @@ stuff that is easy to get wrong.
 
 ## Related code
 
-- SAOv3 host library used by the probe: `SAOH_CORE_DIR` in CMakeLists.txt.
+- SAOv3 host library used by the probe: the `SAOv3-lib` git submodule
+  (`host/saoh_core` inside it); `SAOH_CORE_DIR` in CMakeLists.txt overrides
+  the path. The pinned commit is on the lib's `user/rjp5th/ch32-port` branch,
+  not `main`, because the probe relies on its host-side UDID and GPIO fixes.
+  `git submodule update --init` after a fresh clone, or cmake stops with a
+  message saying so.

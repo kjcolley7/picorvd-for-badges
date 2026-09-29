@@ -39,9 +39,15 @@ pico_sdk_init()
 
 add_subdirectory(src/shell)
 
-# SAOv3 host library (saoh_core from SAOv3-lib); override with -DSAOH_CORE_DIR=...
-set(SAOH_CORE_DIR "$ENV{HOME}/Projects/Embedded/RareCircuits/saov3/lib/host/saoh_core"
+# SAOv3 host library: saoh_core from the SAOv3-lib submodule. Override with
+# -DSAOH_CORE_DIR=... to build against a checkout elsewhere.
+set(SAOH_CORE_DIR "${CMAKE_CURRENT_LIST_DIR}/SAOv3-lib/host/saoh_core"
     CACHE PATH "Path to SAOv3-lib's host/saoh_core directory")
+if(NOT EXISTS "${SAOH_CORE_DIR}/src/discovery.c")
+    message(FATAL_ERROR
+        "SAOv3-lib not found at ${SAOH_CORE_DIR}. "
+        "Run 'git submodule update --init' or pass -DSAOH_CORE_DIR=<SAOv3-lib>/host/saoh_core.")
+endif()
 
 file(
         GLOB SOURCES_SHELL_COMMANDS

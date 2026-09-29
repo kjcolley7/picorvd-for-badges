@@ -14,7 +14,10 @@ git clone https://github.com/FreeRTOS/FreeRTOS-Kernel --recurse-submodules
 ```
 * `FREERTOS_KERNEL_PATH` environment variable (optional)
 * [SAOv3-lib](https://github.com/RareCircuits/SAOv3-lib), for the SAOv3 host
-  commands: pass `-DSAOH_CORE_DIR=<SAOv3-lib>/lib/host/saoh_core` to cmake
+  commands. It is a git submodule (`SAOv3-lib/`): clone with
+  `--recurse-submodules`, or run `git submodule update --init` in an existing
+  checkout. To build against a checkout elsewhere, pass
+  `-DSAOH_CORE_DIR=<SAOv3-lib>/host/saoh_core` to cmake.
 
 
 ## Getting started

@@ -1,0 +1,3 @@
+[submodule "SAOv3-lib"]
+	path = SAOv3-lib
+	url = https://github.com/RareCircuits/SAOv3-lib.git
