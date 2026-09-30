@@ -27,7 +27,7 @@ git submodule update --init
 
 0. Connect pin PD1 on your CH32V device to the Pico's SWIO pin (defaults to pin GP4), connect CH32V ground to Pico ground, and add a 1Kohm pull-up resistor from SWIO to +3.3v.
 
-![Wire connection](docs/board.png "Board")
+![Programmer SAO wired on perfboard](docs/board.jpg "Board")
 
 
 1. Build debugger.
