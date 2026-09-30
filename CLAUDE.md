@@ -7,6 +7,10 @@ stuff that is easy to get wrong.
 
 ## Build and flash the probe
 
+- `FreeRTOS-Kernel` and `SAOv3-lib` are git submodules: `git submodule update
+  --init` after a fresh clone (no `--recursive`; the kernel's nested port
+  submodules are unused). The kernel is pinned to the commit the scheduling
+  fixes below were tuned against, so bumping it is a deliberate change.
 - `cmake -B build -G Ninja && ninja -C build pico_rvd` (PICO_BOARD defaults to
   `pico`; the tethered probe is an original Pi Pico). `pico_rvd_factory` is
   the standalone pass-around programmer; the RP2040-Zero build lives in

@@ -8,16 +8,18 @@ fork of [aappleby/picorvd](https://github.com/aappleby/picorvd) (see
 
 * [pico-sdk](https://github.com/raspberrypi/pico-sdk)
 * `PICO_SDK_PATH` environment variable
-* FreeRTOS Kernel
+* The two git submodules, fetched with
 ```shell
-git clone https://github.com/FreeRTOS/FreeRTOS-Kernel --recurse-submodules
+git submodule update --init
 ```
-* `FREERTOS_KERNEL_PATH` environment variable (optional)
-* [SAOv3-lib](https://github.com/RareCircuits/SAOv3-lib), for the SAOv3 host
-  commands. It is a git submodule (`SAOv3-lib/`): clone with
-  `--recurse-submodules`, or run `git submodule update --init` in an existing
-  checkout. To build against a checkout elsewhere, pass
-  `-DSAOH_CORE_DIR=<SAOv3-lib>/host/saoh_core` to cmake.
+  (not `--recursive`: the kernel's own submodules hold ports the RP2040 build
+  does not use). They are:
+  * `FreeRTOS-Kernel/`: the FreeRTOS SMP kernel, pinned to the commit the
+    firmware is tested against. Set `FREERTOS_KERNEL_PATH` to build against a
+    kernel elsewhere.
+  * `SAOv3-lib/`: [SAOv3-lib](https://github.com/RareCircuits/SAOv3-lib), for
+    the SAOv3 host commands. Pass `-DSAOH_CORE_DIR=<SAOv3-lib>/host/saoh_core`
+    to cmake to build against a checkout elsewhere.
 
 
 ## Getting started
