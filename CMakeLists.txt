@@ -39,10 +39,15 @@ pico_sdk_init()
 
 add_subdirectory(src/shell)
 
-# SAOv3 host library: saoh_core from the SAOv3-lib submodule. Override with
-# -DSAOH_CORE_DIR=... to build against a checkout elsewhere.
-set(SAOH_CORE_DIR "${CMAKE_CURRENT_LIST_DIR}/SAOv3-lib/host/saoh_core"
+# SAOv3 host library: saoh_core from the SAOv3-lib submodule, fetched on first
+# use if the checkout is empty. Override with -DSAOH_CORE_DIR=... to build
+# against a checkout elsewhere.
+set(SAOH_CORE_SUBMODULE_DIR "${CMAKE_CURRENT_LIST_DIR}/SAOv3-lib/host/saoh_core")
+set(SAOH_CORE_DIR "${SAOH_CORE_SUBMODULE_DIR}"
     CACHE PATH "Path to SAOv3-lib's host/saoh_core directory")
+if(SAOH_CORE_DIR STREQUAL SAOH_CORE_SUBMODULE_DIR)
+    init_submodule_if_needed("${CMAKE_CURRENT_LIST_DIR}" SAOv3-lib host/saoh_core/src/discovery.c)
+endif()
 if(NOT EXISTS "${SAOH_CORE_DIR}/src/discovery.c")
     message(FATAL_ERROR
         "SAOv3-lib not found at ${SAOH_CORE_DIR}. "

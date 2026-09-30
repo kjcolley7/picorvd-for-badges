@@ -8,7 +8,8 @@ fork of [aappleby/picorvd](https://github.com/aappleby/picorvd) (see
 
 * [pico-sdk](https://github.com/raspberrypi/pico-sdk)
 * `PICO_SDK_PATH` environment variable
-* The two git submodules, fetched with
+* The two git submodules. cmake fetches each one on first use if its
+  directory is empty; to fetch them up front instead, run
 ```shell
 git submodule update --init
 ```
